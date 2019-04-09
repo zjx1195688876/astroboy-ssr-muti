@@ -1,8 +1,9 @@
 // 为context挂载ssr render方法，这个可以抽离为单独的plugin
 const fs = require('fs');
-const path = require('path');
 const { createBundleRenderer } = require('vue-server-renderer');
 const LRU = require('lru-cache');
+
+let isSPA = false; // 是否是SPA的SSR的标识
 
 const createRenderer = (bundle, options) => {
   return createBundleRenderer(bundle, Object.assign({}, options, {
@@ -17,20 +18,28 @@ class Engine {
   }
 
   renderer(name) {
-    const { ROOT_PATH } = this.app;
+    if (isSPA && this.createRenderer) { // 如果是SPA则直接返回，这样可以提升性能
+      return this.createRenderer;
+    }
+
     // 生产环境直接获取
     // 优化空间
     // 服务启动之后，fs读取所有server-bundle.json和client-manifest.json，然后维护一个cache的列表，不用每次读取json文件
     // 尝试了下缓存，结果没区别
-
     const SSR_CONFIG = this.config['ssr-plugin']; // 来自config.default.js
     const { bundlePath, templatePath, clientManifestPath } = SSR_CONFIG;
+    let bundle,  clientManifest, template;
     
     try {
-      const bundle = require(`${bundlePath}/${name}/vue-ssr-server-bundle.json`);
-      const clientManifest = require(`${clientManifestPath}/${name}/vue-ssr-client-manifest.json`);
-
-      let template = '';
+      if (/\.json/.test(bundlePath)) { // .json文件类型，则为SPA
+        isSPA = true;
+        bundle = require(bundlePath);
+        clientManifest = require(clientManifestPath);
+      } else { // 传入的为文件夹，这时候为muti page
+        bundle = require(`${bundlePath}/${name}/vue-ssr-server-bundle.json`);
+        clientManifest = require(`${clientManifestPath}/${name}/vue-ssr-client-manifest.json`);
+      }
+  
       if (!template) {
         template = fs.readFileSync(templatePath, 'utf-8');
       }
@@ -48,7 +57,7 @@ class Engine {
     }
   }
 
-  renderData(name, url) {
+  renderData(name = '', url) {
     const context = {
       url
     };
